@@ -1,3 +1,4 @@
+#SHELL = /bin/sh -x
 # commands
 CC	:= gcc
 INSTALL	:= install

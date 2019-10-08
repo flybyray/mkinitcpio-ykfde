@@ -13,7 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/random.h>
+#include <linux/random.h>
+#include <sys/syscall.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
@@ -49,6 +51,8 @@
 #define PASSPHRASELEN	SHA1_DIGEST_SIZE * 2
 #define MAX2FLEN	CHALLENGELEN / 2
 
+#define _sys_getrandom(dst,s,flags) syscall(SYS_getrandom, (void*)dst, (size_t)s, (unsigned int)flags)
+
 const static char optstring[] = "hn:Ns:SV";
 const static struct option options_long[] = {
 	/* name			has_arg			flag	val */
@@ -60,6 +64,25 @@ const static struct option options_long[] = {
 	{ "version",		no_argument,		NULL,	'V' },
 	{ 0, 0, 0, 0 }
 };
+
+static int safe_getrandom(void *buf, size_t buflen, unsigned int flags)
+{
+ ssize_t left = buflen;
+ ssize_t ret;
+ uint8_t *p = buf;
+ while (left > 0) {
+    ret = _sys_getrandom(p, left, flags);
+    if (ret == -1) {
+     if (errno != EINTR)
+        return ret;
+    }
+    if (ret > 0) {
+       left -= ret;
+       p += ret;
+    }
+ }
+ return buflen;
+}
 
 char * ask_secret(const char * text) {
 	struct termios tp, tp_save;
@@ -293,8 +316,8 @@ int main(int argc, char **argv) {
 	/* get random number - try random first, fall back to urandom
 	   We generate an array of unsigned int, the use modulo to limit to printable
 	   ASCII characters (32 to 127). */
-	if ((len = getrandom(challenge_int, CHALLENGELEN * sizeof(unsigned int), GRND_RANDOM|GRND_NONBLOCK)) != CHALLENGELEN * sizeof(unsigned int))
-		getrandom((void *)((size_t)challenge_int + len), CHALLENGELEN * sizeof(unsigned int) - len, 0);
+	if ((len = safe_getrandom(challenge_int, CHALLENGELEN * sizeof(unsigned int), GRND_RANDOM|GRND_NONBLOCK)) != CHALLENGELEN * sizeof(unsigned int))
+		safe_getrandom((void *)((size_t)challenge_int + len), CHALLENGELEN * sizeof(unsigned int) - len, 0);
 	for (i = 0; i < CHALLENGELEN; i++)
 		challenge_new[i] = (challenge_int[i] % (127 - 32)) + 32;
 
